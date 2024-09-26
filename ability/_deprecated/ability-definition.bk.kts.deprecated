@@ -1,0 +1,303 @@
+@file:RequiredPlugins("AltSkill2", "AltSkill2-ModuleTrigger", "Reactant", "DynamicScoreboard")
+
+import dev.reactant.reactant.extensions.translateChatColor
+import io.github.clayclaw.altskill2.AltSkill2
+import io.github.clayclaw.altskill2.cache.InternalAbilityCache
+import io.github.clayclaw.altskill2.definition.*
+import io.github.clayclaw.altskill2.module.trigger.cache.InternalSkillCache
+import io.github.clayclaw.altskill2.module.trigger.service.timer.TimerService
+import io.github.clayclaw.altskill2.module.trigger.skill.mythic.MythicActiveSkill
+import io.github.clayclaw.altskill2.module.trigger.skill.mythic.MythicPassiveSkill
+import io.github.clayclaw.altskill2.module.trigger.skill.mythic.MythicStatSkill
+import io.github.clayclaw.dynamicscoreboard.service.ScoreboardService
+import io.github.clayclaw.lightcargo.kts.environment.bukkit.annotation.RequiredPlugins
+import io.github.clayclaw.reactant.inject
+import org.bukkit.Bukkit
+import org.bukkit.Material
+import java.util.*
+
+// Builder DSL
+interface AbilityRegistrable {
+    val id: String
+    var displayName: String
+    var displayMaterial: Material
+    var displayDescription: List<String>
+    fun register()
+}
+
+inner class AbilityPathBuilder(override val id: String): AbilityRegistrable {
+    override var displayName = "請設定名稱"
+    override var displayMaterial = Material.GRASS_BLOCK
+    override var displayDescription = listOf<String>()
+
+    override fun register() {
+        val path = PlayerAbilityPath(id, displayName, displayMaterial, displayDescription)
+        InternalAbilityCache.registerAbilityPath(path)
+        registeredPathIds.add(id)
+    }
+}
+
+fun main(id: String, editing: MainAbilityBuilder.() -> Unit) {
+    MainAbilityBuilder(id).apply(editing).register()
+}
+
+fun addition(sid: String, editing: AdditionAbilityBuilder.() -> Unit) {
+    AdditionAbilityBuilder(sid).apply(editing).register()
+}
+
+inner class MainAbilityBuilder(override val id: String): AbilityRegistrable {
+
+    override var displayName = "請設定名稱"
+    override var displayMaterial = Material.GRASS_BLOCK
+    override var displayDescription = listOf<String>()
+
+    var availableOnPaths: Set<String> = setOf()
+    var experienceFunc: PlayerAbilityExperienceHandler = defaultExpHandler
+    var skillHooks: List<SkillHook> = listOf()
+
+    override fun register() {
+        val ability = PlayerAbility(
+                id, displayName, displayMaterial, displayDescription,
+                PlayerAbilityType.MAIN,
+                availableOnPaths, setOf(), experienceFunc, skillHooks
+        )
+        InternalAbilityCache.registerAbility(ability)
+        registeredAbilityIds.add(id)
+    }
+
+}
+
+inner class AdditionAbilityBuilder(
+        override val id: String
+): AbilityRegistrable {
+
+    override var displayName = "請設定名稱"
+    override var displayMaterial = Material.GRASS_BLOCK
+    override var displayDescription = listOf<String>()
+
+    var experienceFunc: PlayerAbilityExperienceHandler = defaultExpHandler
+    var skillHooks: List<SkillHook> = listOf()
+    var availableOnMainAbilities: Set<String> = setOf()
+
+    override fun register() {
+        val ability = PlayerAbility(
+                id, displayName, displayMaterial, displayDescription,
+                PlayerAbilityType.ADDITIONAL,
+                setOf(), availableOnMainAbilities, experienceFunc, skillHooks
+        )
+        InternalAbilityCache.registerAbility(ability)
+        registeredAbilityIds.add(id)
+    }
+}
+
+fun abilityPath(id: String, editing: AbilityPathBuilder.() -> Unit) {
+    AbilityPathBuilder(id).apply(editing).register()
+}
+
+// Exp handler
+class DefaultExpHandler(
+        private val xFactor: Int = 1,
+        private val yFactor: Int = 50,
+        private val defaultMaxLevel: Int = 10,
+): PlayerAbilityExperienceHandler {
+
+    override val maxExperience: Int = convertLevelToExp(defaultMaxLevel)
+    override val maxLevel: Int = defaultMaxLevel
+
+    fun defaultExpToLevel(exp: Int, maxLevel: Int = defaultMaxLevel): Int {
+        return minOf(exp / yFactor, maxLevel)
+    }
+
+    fun defaultLevelToExp(level: Int): Int {
+        return (level + xFactor) * yFactor
+    }
+
+    override fun convertExpToLevel(exp: Int) = defaultExpToLevel(exp)
+
+    override fun convertLevelToExp(level: Int) = defaultLevelToExp(level)
+}
+
+val defaultExpHandler = DefaultExpHandler() // cant use object here
+
+// Dispose handler
+val registeredPathIds = LinkedList<String>()
+val registeredAbilityIds = LinkedList<String>()
+
+fun onDispose() {
+    registeredPathIds.forEach {
+        InternalAbilityCache.unregisterAbilityPath(it)
+    }
+    registeredAbilityIds.forEach {
+        InternalAbilityCache.unregisterAbility(it)
+    }
+}
+
+fun AbilityPathBuilder.descByPattern(
+        vararg desc: String
+) = buildList<String> {
+    desc.forEach { add("&f${it}") }
+    add(" ")
+    add("&e✦ 點我進入天賦路徑")
+}.map { it.translateChatColor() }
+
+fun MainAbilityBuilder.descByPattern(
+        vararg desc: String
+) = buildList<String> {
+
+    val maxLevel = experienceFunc.maxLevel
+
+    add("主要${getPathNames()}天賦")
+    add(" ")
+    add("&b✦ 天賦說明")
+    desc.forEach { add("&f${it}") }
+    add(" ")
+    add("&b✦ 天賦進度")
+    add("&6天賦等級: &f%altskill2_level_${id}%/${maxLevel}")
+    add("&6等級經驗: &f%altskill2_expbar_${id}%")
+}
+
+fun AdditionAbilityBuilder.descByPattern(
+        vararg desc: String
+) = buildList<String> {
+    add("次要${getMainAbilitiesNames()}天賦")
+    add(" ")
+    add("&b✦ 天賦說明")
+    desc.forEach { add("&f${it}") }
+    add(" ")
+    add("&b✦ 天賦進度")
+    add("&6天賦等級: &f%altskill2_level_${id}%/${experienceFunc.maxLevel}")
+    add("&6等級經驗: &f%altskill2_expbar_${id}%")
+}
+
+fun MainAbilityBuilder.getPathNames(): String {
+    return when(availableOnPaths.size) {
+        0 -> "&c已停用"
+        InternalAbilityCache.getAllPaths().size -> "通用"
+        else -> availableOnPaths.filter { InternalAbilityCache.hasPath(it) }
+                .map { InternalAbilityCache.getPath(it)!! }
+                .joinToString("、") { it.displayName }
+    }
+}
+
+fun AdditionAbilityBuilder.getMainAbilitiesNames(): String {
+    return when(availableOnMainAbilities.size) {
+        0 -> "&c已停用"
+        InternalAbilityCache.getAllAbilities().size -> "通用"
+        else -> availableOnMainAbilities.filter { InternalAbilityCache.hasAbility(it) }
+                .map { InternalAbilityCache.getAbility(it)!! }
+                .joinToString("、") { it.displayName }
+    }
+}
+
+// Utils
+val timerService by lazy { inject<TimerService>()!! }
+val scoreboardService by lazy { inject<ScoreboardService>()!! }
+
+fun AbilityRegistrable.mythicPassiveHook(mythicId: String, manaConsume: Double, cooldown: Long): MythicPassiveSkill {
+    return MythicPassiveSkill(timerService, scoreboardService, displayName, cooldown, manaConsume, mythicId)
+}
+
+fun AbilityRegistrable.mythicActiveHook(mythicId: String, manaConsume: Double, cooldown: Long): MythicActiveSkill {
+    return MythicActiveSkill(this.id, timerService, scoreboardService, displayName, cooldown, manaConsume, mythicId)
+}
+
+fun AbilityRegistrable.statHook(key: String, statKey: String, levelValueMapping: Map<Int, Double>): MythicStatSkill {
+    return MythicStatSkill(key, statKey, levelValueMapping)
+}
+
+// Register
+Bukkit.getScheduler().runTaskLater(AltSkill2.instance, Runnable {
+    registerPath()
+    registerAbility()
+}, 1)
+
+// 注冊天賦路徑
+fun registerPath() {
+    abilityPath("strength") {
+        displayName = "戰鬥"
+        displayMaterial = Material.IRON_SWORD
+        displayDescription = descByPattern()
+    }
+    abilityPath("magic") {
+        displayName = "法術"
+        displayMaterial = Material.ENCHANTED_BOOK
+        displayDescription = descByPattern()
+    }
+    abilityPath("relic") {
+        displayName = "遺物"
+        displayMaterial = Material.ENDER_EYE
+        displayDescription = descByPattern()
+    }
+}
+
+// 注冊天賦
+fun registerAbility() {
+    // 入門劍心
+    main("entry-battle-art") {
+        availableOnPaths = setOf("strength")
+
+        displayName = "入門劍心"
+        displayMaterial = Material.WOODEN_SWORD
+        displayDescription = descByPattern(
+                "劍道上的初心者"
+        )
+    }
+    addition("strength-buff") {
+        availableOnMainAbilities = setOf("entry-battle-art")
+        displayName = "力量增強"
+        displayMaterial = Material.MILK_BUCKET
+    }
+
+    main("test") {
+        displayName = "測試用技能"
+        availableOnPaths = setOf("relic")
+        skillHooks = listOf(mythicPassiveHook("SummonSkeletons", 0.0, 20L))
+
+        displayMaterial = Material.PUFFERFISH
+        displayDescription = descByPattern(
+                "裝備後獲得叫聲"
+        )
+    }
+    main("strength-A") {
+        displayName = "戰鬥回血"
+        availableOnPaths = setOf("strength")
+        skillHooks = listOf(mythicPassiveHook("strength_A", 0.0, 0L))
+
+        displayMaterial = Material.PUFFERFISH
+        displayDescription = descByPattern(
+                "裝備後獲得叫聲"
+        )
+    }
+
+    main("test-active") {
+        displayName = "測試用主動技能"
+        availableOnPaths = setOf("relic")
+        skillHooks = listOf(mythicActiveHook("SMB", 0.0, 60L))
+        displayMaterial = Material.FISHING_ROD
+        displayDescription = descByPattern(
+                "裝備後獲得叫聲"
+        )
+    }
+
+    // 暮光之眼
+    main("eye-of-twilight") {
+        availableOnPaths = setOf("relic")
+        skillHooks = listOf(InternalSkillCache["eye-of-twilight"]!!)
+
+        displayName = "暮光之眼"
+        displayMaterial = Material.ENDER_PEARL
+        displayDescription = descByPattern(
+                "裝備後獲得夜視效果"
+        )
+    }
+    addition("eye-of-twilight-fire") {
+        availableOnMainAbilities = setOf("eye-of-twilight")
+        skillHooks = listOf(InternalSkillCache["eye-of-twilight-fire"]!!)
+
+        displayName = "火焰之眼"
+        displayMaterial = Material.BLAZE_POWDER
+        displayDescription = descByPattern(
+                "投射物命中生物時，使其燃燒 (3 + 天賦等級 * 5) 秒。"
+        )
+    }
+}

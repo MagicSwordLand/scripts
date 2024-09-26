@@ -1,0 +1,86 @@
+@file:RequiredPlugins("AltSkill2", "Reactant")
+
+import io.github.clayclaw.altskill2.AltSkill2
+import io.github.clayclaw.altskill2.cache.InternalAbilityCache
+import io.github.clayclaw.altskill2.dsl.AdditionAbilityBuilder
+import io.github.clayclaw.altskill2.dsl.MainAbilityBuilder
+import io.github.clayclaw.altskill2.dsl.addition
+import io.github.clayclaw.altskill2.dsl.main
+import io.github.clayclaw.lightcargo.kts.environment.bukkit.annotation.RequiredPlugins
+import org.bukkit.Bukkit
+import java.util.HashSet
+
+private val registeredAbilities = HashSet<String>()
+
+fun mainAbility(id: String, editing: MainAbilityBuilder.() -> Unit) {
+    Bukkit.getScheduler().runTaskLater(
+        AltSkill2.instance,
+        Runnable {
+            main(id, editing)
+            registeredAbilities.add(id)
+            println("Registered ability $id")
+        }, 1L)
+}
+
+fun additionAbility(id: String, editing: AdditionAbilityBuilder.() -> Unit) {
+    Bukkit.getScheduler().runTaskLater(
+        AltSkill2.instance,
+        Runnable {
+            addition(id, editing)
+            registeredAbilities.add(id)
+            println("Registered addition ability $id")
+        }, 1L)
+}
+
+fun onDispose() {
+    registeredAbilities.forEach { InternalAbilityCache.unregisterAbility(it) }
+}
+
+fun MainAbilityBuilder.descByPattern(
+    vararg desc: String
+) = buildList<String> {
+
+    val maxLevel = experienceFunc.maxLevel
+
+    add("主要${getPathNames()}天賦")
+    add(" ")
+    add("&b✦ 天賦說明")
+    desc.forEach { add("&f${it}") }
+    add(" ")
+    add("&b✦ 天賦進度")
+    add("&6天賦等級: &f%altskill2_level_${id}%/${maxLevel}")
+    add("&6等級經驗: &f%altskill2_expbar_${id}%")
+}
+
+fun AdditionAbilityBuilder.descByPattern(
+    vararg desc: String
+) = buildList<String> {
+    add("次要${getMainAbilitiesNames()}天賦")
+    add(" ")
+    add("&b✦ 天賦說明")
+    desc.forEach { add("&f${it}") }
+    add(" ")
+    add("&b✦ 天賦進度")
+    add("&6天賦等級: &f%altskill2_level_${id}%/${experienceFunc.maxLevel}")
+    add("&6等級經驗: &f%altskill2_expbar_${id}%")
+}
+
+fun MainAbilityBuilder.getPathNames(): String {
+    return when(availableOnPaths.size) {
+        0 -> "&c已停用"
+        InternalAbilityCache.getAllPaths().size -> "通用"
+        else -> availableOnPaths.filter { InternalAbilityCache.hasPath(it) }
+            .map { InternalAbilityCache.getPath(it)!! }
+            .joinToString("、") { it.displayName }
+    }
+}
+
+fun AdditionAbilityBuilder.getMainAbilitiesNames(): String {
+    return when(availableOnMainAbilities.size) {
+        0 -> "&c已停用"
+        InternalAbilityCache.getAllAbilities().size -> "通用"
+        else -> availableOnMainAbilities.filter { InternalAbilityCache.hasAbility(it) }
+            .map { InternalAbilityCache.getAbility(it)!! }
+            .joinToString("、") { it.displayName }
+    }
+}

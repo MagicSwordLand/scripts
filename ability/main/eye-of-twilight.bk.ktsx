@@ -1,0 +1,19 @@
+@file:RequiredPlugins("AltSkill2", "Reactant")
+@file:Import("src/main/kotlin/ability/skill-template.bk.kts")
+
+import io.github.clayclaw.lightcargo.kts.environment.bukkit.annotation.RequiredPlugins
+import io.github.clayclaw.altskill2.dsl.*
+import io.github.clayclaw.lightcargo.kts.definition.annotation.Import
+import org.bukkit.Material
+import io.github.clayclaw.altskill2.module.trigger.cache.InternalSkillCache
+
+mainAbility("eye-of-twilight") {
+    availableOnPaths = setOf("relic")
+    skillHooks = listOf(InternalSkillCache["eye-of-twilight"]!!)
+
+    displayName = "暮光之眼"
+    displayMaterial = Material.ENDER_PEARL
+    displayDescription = descByPattern(
+            "裝備後獲得夜視效果"
+    )
+}
